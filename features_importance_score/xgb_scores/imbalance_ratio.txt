@@ -1,9 +1,9 @@
 5-class samples per class before SMOTE: {'I': 1650, 'II': 4925, 'IIIa': 1565, 'IIIb': 720, 'IV': 260, 'V': 45}
 2-class samples per class before SMOTE: eGFR_class
 1    7515
-0    7515
+0    1650
 Name: count, dtype: int64
-Original imbalance ratio: 1.0
+Original imbalance ratio: 4.554545454545455
 2-class samples per class after SMOTE: eGFR_class
 1    7515
 0    7515
