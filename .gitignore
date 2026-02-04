@@ -1,1 +1,3 @@
 /venv_graph/
+/features_importance_score/figures
+/features_importance_score/__pycache__
