@@ -2,3 +2,4 @@
 /features_importance_score/figures
 /features_importance_score/__pycache__
 /results_*
+/slurm/
