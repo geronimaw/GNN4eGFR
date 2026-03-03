@@ -59,8 +59,8 @@ def plot_roc(y_true, y_proba, model_name, out_dir, class_id=None):
 def plot_calibration(y_true, y_proba, model_name, out_dir, class_counts):
     if len(class_counts) == 2:
         prob_true, prob_pred = calibration_curve(y_true, y_proba, n_bins=10)
-        prob_true = {prob_true}
-        prob_pred = {prob_pred}
+        prob_true = [prob_true]
+        prob_pred = [prob_pred]
     else:
         from sklearn.preprocessing import label_binarize
         y_test_bin = label_binarize(y_true, classes=range(len(class_counts)))
@@ -90,16 +90,16 @@ def train_eval_sklearn(model, X_train, y_train, X_test, y_test, task, class_coun
     y_pred = model.predict(X_test)
 
     if task == "classification":
-        y_proba = model.predict_proba(X_test) 
-        metrics = compute_classification_metrics(y_test, y_pred, y_proba, class_counts)
+        y_proba = model.predict_proba(X_test)
         probs = y_proba[:, 1] if len(class_counts) == 2 else y_proba
+        metrics = compute_classification_metrics(y_test, y_pred, probs, class_counts)
         return metrics, y_pred, probs
     else:
         metrics = compute_regression_metrics(y_test, y_pred)
         return metrics, y_pred, None
     
 
-def train_eval_kan(kan_model, train_data, task, steps=300, lr=1e-3):
+def train_eval_kan(kan_model, train_data, task, class_counts, steps=300, lr=1e-3):
     optimizer = torch.optim.Adam(kan_model.parameters(), lr=lr)
 
     X_train = train_data["train_input"]
@@ -133,7 +133,7 @@ def train_eval_kan(kan_model, train_data, task, steps=300, lr=1e-3):
             y_test_np = y_test.cpu().numpy()
 
             metrics = compute_classification_metrics(
-                y_test_np, y_pred_np, y_proba_np
+                y_test_np, y_pred_np, y_proba_np, class_counts
             )
             return metrics, y_pred_np, y_proba_np
         else:
@@ -175,7 +175,7 @@ class ExperimentRunner:
 
     def run_kan_model(self, name, kan_model, train_data, task, steps):
         metrics, y_pred, y_proba = train_eval_kan(
-            kan_model, train_data, task, steps
+            kan_model, train_data, task, self.class_counts, steps
         )
 
         y_test = train_data["test_label"].cpu().numpy()

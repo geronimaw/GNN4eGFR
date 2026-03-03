@@ -10,7 +10,7 @@ from utils.models import (
 )
 from utils.function import ExperimentRunner
 
-fold_path = "/leonardo_work/IscrC_NHPE/ecml26/GNN4eGFR"
+fold_path = "./"
 out_path = os.path.join(fold_path, "results_eGFR")
 file_path = os.path.join(fold_path, "XY_temp.csv")
 file_updated_path = os.path.join(fold_path, "XY_temp_updated.csv")
