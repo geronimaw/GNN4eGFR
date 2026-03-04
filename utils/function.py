@@ -12,9 +12,14 @@ from sklearn.model_selection import StratifiedKFold, KFold
 
 
 def compute_classification_metrics(y_true, y_pred, y_proba, class_counts):
+    print(y_true.shape, y_proba.shape)
     return {
         "accuracy": accuracy_score(y_true, y_pred),
-        "f1": f1_score(y_true, y_pred, average='binary' if len(class_counts) == 2 else 'weighted'),
+        "f1": f1_score(y_true, y_pred, average='binary'),
+        "auc": roc_auc_score(y_true, y_proba),
+    } if len(class_counts) == 2 else {
+        "accuracy": accuracy_score(y_true, y_pred),
+        "f1": f1_score(y_true, y_pred, average='weighted'),
         "auc": roc_auc_score(y_true, y_proba, multi_class='ovr'),
     }
 
@@ -52,8 +57,9 @@ def plot_roc(y_true, y_proba, model_name, out_dir, class_id=None):
     plt.plot(fpr, tpr)
     plt.xlabel("FPR")
     plt.ylabel("TPR")
-    plt.title(f"ROC - {model_name} (class #{class_id})")
-    plot_and_save(fig, os.path.join(out_dir, f"{model_name}_roc_{class_id}class.png"))
+    plt.title(f"ROC - {model_name}" + f"(class #{class_id})" if class_id is not None else
+              f"ROC - {model_name}")
+    plot_and_save(fig, os.path.join(out_dir, f"{model_name}_roc{'_' + str(class_id)  + 'class' if class_id is not None else ''}.png"))
 
 
 def plot_calibration(y_true, y_proba, model_name, out_dir, class_counts):
@@ -80,9 +86,9 @@ def plot_calibration(y_true, y_proba, model_name, out_dir, class_counts):
         plt.plot(prob_pred[i], prob_true[i])
         plt.xlabel("Predicted")
         plt.ylabel("True")
-        plt.title(f"Calibration - {model_name}" + f"class #{i}" if len(prob_true) > 2 else '')
-        plot_and_save(fig, os.path.join(out_dir, f"{model_name}_calibration" +
-                                         f"_{i}class" if len(prob_true) > 2 else '' + ".png"))
+        plt.title(f"Calibration - {model_name}" + f"class #{i}" if len(prob_true) > 2 else
+                  f"Calibration - {model_name}")
+        plot_and_save(fig, os.path.join(out_dir, f"{model_name}_calibration{'_' + str(i) + 'class' if len(prob_true) > 2 else ''}.png"))
         
 
 def train_eval_sklearn(model, X_train, y_train, X_test, y_test, task, class_counts):
@@ -121,12 +127,15 @@ def train_eval_kan(kan_model, train_data, task, class_counts, steps=300, lr=1e-3
         loss.backward()
         optimizer.step()
 
+    # kan_model.fit(train_data, steps=steps,
+    #               loss_fn=torch.nn.CrossEntropyLoss(), lr=lr)
+
     kan_model.eval()
     with torch.no_grad():
         outputs = kan_model(X_test)
 
         if task == "classification":
-            probs = torch.softmax(outputs, dim=1)[:, 1]
+            probs = torch.softmax(outputs, dim=1)[:, 1] if len(class_counts) == 2 else torch.softmax(outputs, dim=1)
             y_pred = torch.argmax(outputs, dim=1)
             y_pred_np = y_pred.cpu().numpy()
             y_proba_np = probs.cpu().numpy()
@@ -146,7 +155,7 @@ def train_eval_kan(kan_model, train_data, task, class_counts, steps=300, lr=1e-3
 
 class ExperimentRunner:
     def __init__(self, class_counts, output_dir="results"):
-        self.output_dir = output_dir + "_binary" if len(class_counts) == 2 else output_dir + f"_{len(class_counts)}class"
+        self.output_dir = output_dir
         os.makedirs(self.output_dir, exist_ok=True)
         self.results = {}
         self.class_counts = class_counts
@@ -162,7 +171,7 @@ class ExperimentRunner:
             else:
                 from sklearn.preprocessing import label_binarize
                 y_test_bin = label_binarize(y_test, classes=range(len(self.class_counts)))
-                y_proba = model.predict_proba(X_test)
+                # y_proba = model.predict_proba(X_test)
                 fpr = dict()
                 tpr = dict()
 
@@ -181,8 +190,22 @@ class ExperimentRunner:
         y_test = train_data["test_label"].cpu().numpy()
 
         if task == "classification":
-            plot_roc(y_test, y_proba, name, self.output_dir)
-            plot_calibration(y_test, y_proba, name, self.output_dir)
+            if len(self.class_counts) == 2:
+                plot_roc(y_test, y_proba, name, self.output_dir)
+            else:
+                from sklearn.preprocessing import label_binarize
+                y_test_bin = label_binarize(y_test, classes=range(len(self.class_counts)))
+                # y_proba = kan_model(train_data["test_input"])
+                fpr = dict()
+                tpr = dict()
+
+                for i in range(len(self.class_counts)):
+                    fpr[i], tpr[i], _ = roc_curve(y_test_bin[:, i], y_proba[:, i])
+                    plot_roc(fpr[i], tpr[i], name, self.output_dir, i)
+            plot_calibration(y_test, y_proba, name, self.output_dir, self.class_counts)
+
+            # plot_roc(y_test, y_proba, name, self.output_dir)
+            # plot_calibration(y_test, y_proba, name, self.output_dir)
 
         self.results[name] = metrics
 

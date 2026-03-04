@@ -1,12 +1,15 @@
 from sklearn.svm import SVC
 from xgboost import XGBClassifier
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.neural_network import MLPClassifier
 from sklearn.linear_model import LogisticRegression
 from interpret.glassbox import ExplainableBoostingClassifier
 
-
 def get_mlp_classifier():
-    return MLPClassifier(
+    return Pipeline([
+    ("scaler", StandardScaler()),
+    ("model", MLPClassifier(
         hidden_layer_sizes=(4,),      # leggermente più grande per equità
         activation='relu',
         solver='adam',
@@ -15,28 +18,37 @@ def get_mlp_classifier():
         learning_rate_init=1e-3,
         max_iter=500,
         random_state=42
-    )
+    ))
+    ])
 
 def get_svm_linear():
-    return SVC(
+    return Pipeline([
+    ("scaler", StandardScaler()),
+    ("model", SVC(
         kernel='linear',
         C=1.0,
         probability=True,
         random_state=42
-    )
+    ))
+    ])
 
 def get_svm_rbf():
-    return SVC(
+    return Pipeline([
+    ("scaler", StandardScaler()),
+    ("model", SVC(
         kernel='rbf',
         C=1.0,
         gamma='scale',
         probability=True,
         random_state=42
-    )
+    ))
+    ])
 
 
 def get_xgb_classifier(class_counts):
-    return XGBClassifier(
+    return Pipeline([
+    ("scaler", StandardScaler()),
+    ("model", XGBClassifier(
         n_estimators=100,        # moderato
         max_depth=3,             # shallow trees
         learning_rate=0.05,
@@ -46,22 +58,29 @@ def get_xgb_classifier(class_counts):
         use_label_encoder=False,
         eval_metric='logloss' if len(class_counts) == 2 else 'mlogloss',
         random_state=42
-    )
+    ))
+    ])
 
 def get_ebm_classifier():
-    return ExplainableBoostingClassifier(
+    return Pipeline([
+    ("scaler", StandardScaler()),
+    ("model", ExplainableBoostingClassifier(
         interactions=0,     # solo additive → fairness con KAN shallow
         max_bins=32,
         max_interaction_bins=16,
         learning_rate=0.01,
         random_state=42
-    ) # TODO: provare con interactions=10 (più competitivo ma diventa più potente della KAN)
+    )) # TODO: provare con interactions=10 (più competitivo ma diventa più potente della KAN)
+    ])
 
 def get_logreg_classifier():
-    return LogisticRegression(
+    return Pipeline([
+    ("scaler", StandardScaler()),
+    ("model", LogisticRegression(
         penalty='l2',
         C=1.0,
         solver='lbfgs',
         max_iter=1000,
         random_state=42
-    )
+    ))
+    ])
