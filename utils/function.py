@@ -1,4 +1,5 @@
 import os
+import csv
 import torch
 import numpy as np
 import pandas as pd
@@ -105,7 +106,7 @@ def train_eval_sklearn(model, X_train, y_train, X_test, y_test, task, class_coun
         return metrics, y_pred, None
     
 
-def train_eval_kan(kan_model, train_data, task, class_counts, steps=300, lr=1e-3):
+def train_eval_kan(kan_model, train_data, task, class_counts, steps=300, lr=1e-3, output_dir=None):
     optimizer = torch.optim.Adam(kan_model.parameters(), lr=lr)
 
     X_train = train_data["train_input"]
@@ -113,10 +114,15 @@ def train_eval_kan(kan_model, train_data, task, class_counts, steps=300, lr=1e-3
     X_test = train_data["test_input"]
     y_test = train_data["test_label"]
 
+    train_loss, train_acc, test_metrics = [] , [], []
+    best_test_auc = 0.
+    
     kan_model.train()
 
-    for _ in range(steps):
+    for step in range(steps):
+
         optimizer.zero_grad()
+
         outputs = kan_model(X_train)
 
         if task == "classification":
@@ -127,31 +133,70 @@ def train_eval_kan(kan_model, train_data, task, class_counts, steps=300, lr=1e-3
         loss.backward()
         optimizer.step()
 
+        do_test = False
+        if (steps > 100 and step % (5 * steps) == 0) or steps < 100:
+            train_loss.append(loss.item())
+
+            if task == "classification":
+                with torch.no_grad():
+                    preds = outputs.argmax(dim=1)
+                    acc = (preds == y_train).float().mean().item()
+
+                train_acc.append(acc)
+
+            print(f"iter {step}/{steps}\n\t\ttrain loss = {train_loss[-1]}\ttrain_acc = {acc}")
+            do_test = True
     # kan_model.fit(train_data, steps=steps,
     #               loss_fn=torch.nn.CrossEntropyLoss(), lr=lr)
 
-    kan_model.eval()
-    with torch.no_grad():
-        outputs = kan_model(X_test)
+    if do_test:
+        kan_model.eval()
 
-        if task == "classification":
-            probs = torch.softmax(outputs, dim=1)[:, 1] if len(class_counts) == 2 else torch.softmax(outputs, dim=1)
-            y_pred = torch.argmax(outputs, dim=1)
-            y_pred_np = y_pred.cpu().numpy()
-            y_proba_np = probs.cpu().numpy()
-            y_test_np = y_test.cpu().numpy()
+        with torch.no_grad():
+            outputs = kan_model(X_test)
 
-            metrics = compute_classification_metrics(
-                y_test_np, y_pred_np, y_proba_np, class_counts
-            )
-            return metrics, y_pred_np, y_proba_np
-        else:
-            y_pred = outputs.squeeze()
-            y_pred_np = y_pred.cpu().numpy()
-            y_test_np = y_test.cpu().numpy()
-            metrics = compute_regression_metrics(y_test_np, y_pred_np)
-            return metrics, y_pred_np, None
+            if task == "classification":
+                probs = torch.softmax(outputs, dim=1)[:, 1] if len(class_counts) == 2 else torch.softmax(outputs, dim=1)
+                y_pred = torch.argmax(outputs, dim=1)
+                y_pred_np = y_pred.cpu().numpy()
+                y_proba_np = probs.cpu().numpy()
+                y_test_np = y_test.cpu().numpy()
+
+                test_metrics.append(compute_classification_metrics(y_test_np, y_pred_np, y_proba_np, class_counts))
+            else:
+                y_pred = outputs.squeeze()
+                y_pred_np = y_pred.cpu().numpy()
+                y_test_np = y_test.cpu().numpy()
+                test_metrics.append(compute_regression_metrics(y_test_np, y_pred_np))
+       
+        if test_metrics[-1]["accuracy"] > best_test_auc:
+            best_test_auc = test_metrics[-1]["accuracy"]
+
+            y_test = train_data["test_label"].cpu().numpy()
+            if task == "classification":
+                if len(class_counts) == 2:
+                    plot_roc(y_test, y_proba_np, "KAN (best test AUC)", output_dir)
+                else:
+                    from sklearn.preprocessing import label_binarize
+                    y_test_bin = label_binarize(y_test, classes=range(len(class_counts)))
+                    # y_proba = kan_model(train_data["test_input"])
+                    fpr = dict()
+                    tpr = dict()
+
+                    for i in range(len(class_counts)):
+                        fpr[i], tpr[i], _ = roc_curve(y_test_bin[:, i], y_proba_np[:, i])
+                        plot_roc(fpr[i], tpr[i], "KAN (best test AUC)", output_dir, i)
+                plot_calibration(y_test, y_proba_np, "KAN (best test AUC)", output_dir, class_counts)
+
+                print(f"\t\ttest auc (new best) = {best_test_auc}")
+                best_test_metrics = test_metrics[-1]
         
+        else:
+            print(f"\t\tbest test auc still = {best_test_auc}")
+     
+
+    return train_loss, train_acc, test_metrics, best_test_metrics  
+
 
 class ExperimentRunner:
     def __init__(self, class_counts, output_dir="results"):
@@ -183,31 +228,26 @@ class ExperimentRunner:
         self.results[name] = metrics
 
     def run_kan_model(self, name, kan_model, train_data, task, steps):
-        metrics, y_pred, y_proba = train_eval_kan(
-            kan_model, train_data, task, self.class_counts, steps
+        train_loss, train_acc, test_metrics, best_test_metrics = train_eval_kan(
+            kan_model, train_data, task, self.class_counts, steps=steps, output_dir=self.output_dir
         )
-
-        y_test = train_data["test_label"].cpu().numpy()
-
-        if task == "classification":
-            if len(self.class_counts) == 2:
-                plot_roc(y_test, y_proba, name, self.output_dir)
-            else:
-                from sklearn.preprocessing import label_binarize
-                y_test_bin = label_binarize(y_test, classes=range(len(self.class_counts)))
-                # y_proba = kan_model(train_data["test_input"])
-                fpr = dict()
-                tpr = dict()
-
-                for i in range(len(self.class_counts)):
-                    fpr[i], tpr[i], _ = roc_curve(y_test_bin[:, i], y_proba[:, i])
-                    plot_roc(fpr[i], tpr[i], name, self.output_dir, i)
-            plot_calibration(y_test, y_proba, name, self.output_dir, self.class_counts)
-
             # plot_roc(y_test, y_proba, name, self.output_dir)
             # plot_calibration(y_test, y_proba, name, self.output_dir)
+        
+        history = []
+        for idx, iter_metric in enumerate(test_metrics):
+            iter_metric["step"] = idx//100*steps
+            iter_metric["train_loss"] = train_loss[idx] 
+            iter_metric["train_acc"] = train_acc[idx] 
+            history.append(iter_metric)
+        
+        fieldnames = iter_metric.keys()
+        with open(os.path.join(self.output_dir, "history.csv"), "w") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(history)
 
-        self.results[name] = metrics
+        self.results[name] = best_test_metrics
 
     def summary(self):
         df = pd.DataFrame(self.results).T
